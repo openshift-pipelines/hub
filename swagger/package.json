@@ -17,6 +17,9 @@
     "typescript": "^5.4.5",
     "web-vitals": "^3.5.2"
   },
+  "overrides": {
+    "jsonpath": "^1.2.1"
+  },
   "scripts": {
     "start": "GENERATE_SOURCEMAP=false react-scripts start",
     "build": "GENERATE_SOURCEMAP=false react-scripts build",
