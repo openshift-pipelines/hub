@@ -206,7 +206,6 @@ func schema_pkg_apis_pipeline_pod_Template(ref common.ReferenceCallback) common.
 					"volumes": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-list-type":       "atomic",
 								"x-kubernetes-patch-merge-key": "name",
 								"x-kubernetes-patch-strategy":  "merge,retainKeys",
 							},
@@ -313,6 +312,13 @@ func schema_pkg_apis_pipeline_pod_Template(ref common.ReferenceCallback) common.
 					"hostNetwork": {
 						SchemaProps: spec.SchemaProps{
 							Description: "HostNetwork specifies whether the pod may use the node network namespace",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"hostUsers": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostUsers indicates whether the pod will use the host's user namespace. Optional: Default to true. If set to true or not present, the pod will be run in the host user namespace, useful for when the pod needs a feature only available to the host user namespace, such as loading a kernel module with CAP_SYS_MODULE. When set to false, a new user namespace is created for the pod. Setting false is useful to mitigating container breakout vulnerabilities such as allowing containers to run as root without their user having root privileges on the host. This field depends on the kubernetes feature gate UserNamespacesSupport being enabled.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -854,11 +860,6 @@ func schema_pkg_apis_pipeline_v1alpha1_StepActionSpec(ref common.ReferenceCallba
 						},
 					},
 					"params": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
-							},
-						},
 						SchemaProps: spec.SchemaProps{
 							Description: "Params is a list of input parameters required to run the stepAction. Params must be supplied as inputs in Steps unless they declare a defaultvalue.",
 							Type:        []string{"array"},

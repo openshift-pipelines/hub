@@ -158,6 +158,13 @@ function set_enable_kubernetes_sidecar() {
   kubectl patch configmap feature-flags -n tekton-pipelines -p "$jsonpatch"
 }
 
+function set_default_sidecar_log_polling_interval() {
+  # Sets the default-sidecar-log-polling-interval in the config-defaults ConfigMap to 0ms for e2e tests
+  echo "Patching config-defaults ConfigMap: setting default-sidecar-log-polling-interval to 0ms"
+  jsonpatch='{"data": {"default-sidecar-log-polling-interval": "0ms"}}'
+  kubectl patch configmap config-defaults -n tekton-pipelines -p "$jsonpatch"
+}
+
 function run_e2e() {
   # Run the integration tests
   header "Running Go e2e tests"
@@ -170,7 +177,7 @@ function run_e2e() {
   # and they cause a lot of noise in the logs, making it harder to debug integration
   # test failures.
   if [ "${RUN_YAML_TESTS}" == "true" ]; then
-    go_test_e2e -mod=readonly -tags=examples -timeout=${E2E_GO_TEST_TIMEOUT} ./test/ || failed=1
+    go_test_e2e -mod=readonly -parallel=2 -tags=examples -timeout=${E2E_GO_TEST_TIMEOUT} ./test/
   fi
 
   if [ "${RUN_FEATUREFLAG_TESTS}" == "true" ]; then
@@ -187,6 +194,7 @@ set_enable_param_enum "$ENABLE_PARAM_ENUM"
 set_enable_artifacts "$ENABLE_ARTIFACTS"
 set_enable_concise_resolver_syntax "$ENABLE_CONCISE_RESOLVER_SYNTAX"
 set_enable_kubernetes_sidecar "$ENABLE_KUBERNETES_SIDECAR"
+set_default_sidecar_log_polling_interval
 run_e2e
 
 (( failed )) && fail_test
