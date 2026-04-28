@@ -1,6 +1,0 @@
-# Frontend and swagger app are not compiled into the Go API/db images.
-ui/
-swagger/
-
-.git/
-.github/
