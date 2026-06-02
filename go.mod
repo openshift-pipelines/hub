@@ -1,8 +1,6 @@
 module github.com/tektoncd/hub
 
-go 1.24.0
-
-toolchain go1.24.6
+go 1.24.13
 
 require (
 	github.com/ActiveState/vt10x v1.3.1
@@ -25,7 +23,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
-	github.com/tektoncd/pipeline v1.9.2
+	github.com/tektoncd/pipeline v1.9.3
 	github.com/tektoncd/plumbing v0.0.0-20220817140952-3da8ce01aeeb
 	go.uber.org/automaxprocs v1.6.0
 	go.uber.org/zap v1.27.1
