@@ -163,9 +163,9 @@ replaceImageName() {
 }
 
 createNewPreRelease() {
-  echo; echo 'Creating New Tekton Hub Pre-Release :'
+  echo; echo 'Creating New Hub Pre-Release :'
 
-  gh repo set-default git@github.com:tektoncd/hub.git
+  gh repo set-default git@github.com:openshift-pipelines/hub.git
 
   gh release create --draft --prerelease -t ${RELEASE_VERSION} ${RELEASE_VERSION}
 

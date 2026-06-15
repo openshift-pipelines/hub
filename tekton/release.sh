@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u -e -o pipefail
 
-HUB_REPO="https://github.com/tektoncd/hub"
+HUB_REPO="https://github.com/openshift-pipelines/hub"
 UPSTREAM_REMOTE="upstream"
 BRANCH="main"
 IMAGE_REGISTRY="quay.io/tekton-hub"
@@ -66,7 +66,7 @@ whichCluster() {
 }
 
 createGitTag() {
-  cd "${GOPATH}"/src/github.com/tektoncd/hub
+  cd "${GOPATH}"/src/github.com/openshift-pipelines/hub
 
   [[ -n $(git status --porcelain 2>&1) ]] && {
     echo "We have detected some changes in your repo"
@@ -131,10 +131,10 @@ createHubSecretAndCM() {
 
   kubectl -n ${HUB_NAMESPACE} get cm api 2>/dev/null >/dev/null || {
     echo "Hub Config File:"
-    read -r -e -p "Enter Raw URL of the hub config file (Default: https://raw.githubusercontent.com/tektoncd/hub/main/config.yaml): " HUB_CONFIG
+    read -r -e -p "Enter Raw URL of the hub config file (Default: https://raw.githubusercontent.com/openshift-pipelines/hub/main/config.yaml): " HUB_CONFIG
 
     if [ -z "$HUB_CONFIG" ]; then
-      HUB_CONFIG=https://raw.githubusercontent.com/tektoncd/hub/main/config.yaml
+      HUB_CONFIG=https://raw.githubusercontent.com/openshift-pipelines/hub/main/config.yaml
     fi
 
     kubectl -n ${HUB_NAMESPACE} create cm api \
@@ -151,7 +151,7 @@ createRegistrySecret() {
   kubectl -n ${HUB_CI_NAMESPACE} delete secret registry-sec --ignore-not-found
   kubectl -n ${HUB_CI_NAMESPACE} get secret registry-sec 2>/dev/null >/dev/null || {
 
-    echo; echo "Enter Quay registry credentials to push the images: (quay.io/tekton-hub) "
+    echo; echo "Enter Quay registry credentials to push the images: (quay.io/openshift-pipelines/hub) "
     read -r -e -p "Enter Username: " USERNAME
     read -r -e -sp "Enter Password: " PASSWORD
 
@@ -287,7 +287,7 @@ main() {
 
   checkPrerequisites
 
-  echo 'Tekton Hub Release: '
+  echo 'Hub Release: '
 
   # ask for release version to create tag
   getReleaseVersion
