@@ -4,7 +4,7 @@ WORKDIR /go/src/github.com/tektoncd/hub
 COPY . .
 ARG TARGETOS
 ARG TARGETARCH
-RUN GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o api-server ./api/cmd/api/..
+RUN GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o api-server ./api/cmd/api
 FROM alpine:3.23
 
 RUN apk --no-cache add git ca-certificates openssh-client && addgroup -S hub && adduser -S hub -G hub
