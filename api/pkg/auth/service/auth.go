@@ -17,9 +17,12 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/markbates/goth/gothic"
@@ -52,9 +55,19 @@ type Services struct {
 }
 
 var (
-	UI_URL   string
-	provider string
+	errMissingRedirectURI    = errors.New("missing redirect_uri")
+	errInvalidRedirectURI    = errors.New("invalid redirect_uri")
+	errInvalidRedirectScheme = errors.New("invalid redirect_uri scheme")
+	errRedirectNotAllowed    = errors.New("redirect_uri is not allowed")
 )
+
+var oauthProviders = []struct {
+	id, secret, name string
+}{
+	{"GH_CLIENT_ID", "GH_CLIENT_SECRET", "github"},
+	{"BB_CLIENT_ID", "BB_CLIENT_SECRET", "bitbucket"},
+	{"GL_CLIENT_ID", "GL_CLIENT_SECRET", "gitlab"},
+}
 
 type Service interface {
 	AuthCallBack(res http.ResponseWriter, req *http.Request)
@@ -69,9 +82,31 @@ func New(api app.Config) Service {
 	}
 }
 
+func (s *service) newRequest(provider string) request {
+	return request{
+		db:            s.DB(context.Background()),
+		log:           s.Logger(context.Background()),
+		defaultScopes: s.api.Data().Default.Scopes,
+		jwtConfig:     s.api.JWTConfig(),
+		provider:      provider,
+	}
+}
+
+func (r request) httpError(res http.ResponseWriter, err error, status int) {
+	r.log.Error(err)
+	http.Error(res, err.Error(), status)
+}
+
+func writeJSON(res http.ResponseWriter, log *app.Logger, v interface{}) {
+	res.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(res).Encode(v); err != nil && log != nil {
+		log.Error(err)
+		http.Error(res, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // Return name and status of the services
 func Status(res http.ResponseWriter, req *http.Request) {
-
 	authSvc := Services{
 		AuthService{
 			Name:   "auth",
@@ -89,8 +124,10 @@ func Status(res http.ResponseWriter, req *http.Request) {
 // Authenticates user with the speicified git provider
 // using goth and calls the AuthCallback function
 func Authenticate(res http.ResponseWriter, req *http.Request) {
-	UI_URL = req.FormValue("redirect_uri")
-	provider = mux.Vars(req)["provider"]
+	if _, err := parseAllowedRedirect(req.FormValue("redirect_uri")); err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	gothic.BeginAuthHandler(res, req)
 }
@@ -98,32 +135,30 @@ func Authenticate(res http.ResponseWriter, req *http.Request) {
 // Once user is authenticated, store the user details in db
 // and redirect to UI with the status code and auth code
 func (s *service) AuthCallBack(res http.ResponseWriter, req *http.Request) {
-
-	r := request{
-		db:            s.DB(context.Background()),
-		log:           s.Logger(context.Background()),
-		defaultScopes: s.api.Data().Default.Scopes,
-		jwtConfig:     s.api.JWTConfig(),
-		provider:      provider,
-	}
-
-	ghUser, err := gothic.CompleteUserAuth(res, req)
+	ui, err := parseAllowedRedirect(readConfiguredRedirectURI())
 	if err != nil {
-		r.log.Error(err)
 		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	params := req.URL.Query()
+	provider := mux.Vars(req)["provider"]
+	r := s.newRequest(provider)
 
-	if err = r.insertData(ghUser, params.Get("code"), provider); err != nil {
-		r.log.Error(err)
-		res.Header().Set("Location", fmt.Sprintf("%s?status=%d", UI_URL, http.StatusBadRequest))
-		res.WriteHeader(http.StatusTemporaryRedirect)
+	ghUser, err := gothic.CompleteUserAuth(res, req)
+	if err != nil {
+		r.httpError(res, err, http.StatusBadRequest)
+		return
 	}
 
-	res.Header().Set("Location", fmt.Sprintf("%s?status=%d&code=%s", UI_URL, http.StatusOK, params.Get("code")))
-	res.WriteHeader(http.StatusTemporaryRedirect)
+	code := req.URL.Query().Get("code")
+	status := http.StatusOK
+	if err = r.insertData(ghUser, code, provider); err != nil {
+		r.log.Error(err)
+		status = http.StatusBadRequest
+		code = ""
+	}
+
+	sendUIRedirect(res, ui, status, code, provider)
 }
 
 // Checks for auth code in the headers, validates the
@@ -145,89 +180,192 @@ func (s *service) HubAuthenticate(res http.ResponseWriter, req *http.Request) {
 	}
 
 	var gitUser model.User
-	// Check if user exist
-	q := r.db.Model(&model.User{}).
-		Where("code = ?", code)
-
-	err := q.First(&gitUser).Error
+	err := r.db.Model(&model.User{}).
+		Where("code = ?", req.FormValue("code")).
+		First(&gitUser).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			http.Error(res, err.Error(), http.StatusBadRequest)
 			return
-		} else {
-			r.log.Error(err)
-			http.Error(res, err.Error(), http.StatusInternalServerError)
-			return
 		}
+		r.httpError(res, err, http.StatusInternalServerError)
+		return
 	}
 
 	// Once the user is authenticated clear the code from DB and user struct so that it can't be reused once the user logs in
 	gitUser.Code = nil
 	if err := r.db.Model(&model.User{}).Where("email = ?", gitUser.Email).Update("code", gitUser.Code).Error; err != nil {
-		r.log.Error(err)
-		http.Error(res, err.Error(), http.StatusInternalServerError)
+		r.httpError(res, err, http.StatusInternalServerError)
 		return
+	}
+
+	accountQuery := r.db.Model(&model.Account{}).Where("user_id = ?", gitUser.ID)
+	if loginProvider := req.FormValue("provider"); loginProvider != "" {
+		accountQuery = accountQuery.Where("provider = ?", loginProvider)
 	}
 
 	var acc model.Account
-	accountQuery := r.db.Model(&model.Account{}).Where(model.Account{UserID: gitUser.ID, Provider: provider})
-
-	err = accountQuery.First(&acc).Error
-	if err != nil {
-		r.log.Error(err)
-		http.Error(res, err.Error(), http.StatusBadRequest)
+	if err := accountQuery.First(&acc).Error; err != nil {
+		r.httpError(res, err, http.StatusBadRequest)
 		return
 	}
 
-	// gets user scopes to add in jwt
 	scopes, err := r.userScopes(&acc)
 	if err != nil {
-		r.log.Error(err)
-		http.Error(res, err.Error(), http.StatusInternalServerError)
+		r.httpError(res, err, http.StatusInternalServerError)
 		return
 	}
 
-	userTokens, err := r.createTokens(&gitUser, scopes, provider)
+	userTokens, err := r.createTokens(&gitUser, scopes, acc.Provider)
 	if err != nil {
-		r.log.Error(err)
-		http.Error(res, err.Error(), http.StatusInternalServerError)
+		r.httpError(res, err, http.StatusInternalServerError)
 		return
 	}
 
-	res.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(res).Encode(userTokens); err != nil {
-		r.log.Error(err)
-		http.Error(res, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	writeJSON(res, r.log, userTokens)
 }
 
 // Provides a list of git provider present in auth server
 func List(res http.ResponseWriter, req *http.Request) {
-
 	providerList := make([]authApp.Provider, 0)
-
-	if os.Getenv("GH_CLIENT_ID") != "" && os.Getenv("GH_CLIENT_SECRET") != "" {
-		providerList = append(providerList, authApp.Provider{Name: "github"})
-	}
-
-	if os.Getenv("BB_CLIENT_ID") != "" && os.Getenv("BB_CLIENT_SECRET") != "" {
-		providerList = append(providerList, authApp.Provider{Name: "bitbucket"})
-	}
-
-	if os.Getenv("GL_CLIENT_ID") != "" && os.Getenv("GL_CLIENT_SECRET") != "" {
-		providerList = append(providerList, authApp.Provider{Name: "gitlab"})
-	}
-
-	providers := authApp.ProviderList{
-		Data: providerList,
+	for _, p := range oauthProviders {
+		if os.Getenv(p.id) != "" && os.Getenv(p.secret) != "" {
+			providerList = append(providerList, authApp.Provider{Name: p.name})
+		}
 	}
 
 	var log app.Logger
-	res.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(res).Encode(providers); err != nil {
-		log.Error(err)
-		http.Error(res, err.Error(), http.StatusInternalServerError)
+	writeJSON(res, &log, authApp.ProviderList{Data: providerList})
+}
+
+func parseRedirectURI(raw string) (*url.URL, error) {
+	if raw == "" {
+		return nil, errMissingRedirectURI
+	}
+	if strings.ContainsAny(raw, "\r\n") {
+		return nil, errInvalidRedirectURI
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, errInvalidRedirectURI
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, errInvalidRedirectScheme
+	}
+	if u.Host == "" || u.User != nil {
+		return nil, errInvalidRedirectURI
+	}
+	return u, nil
+}
+
+func configuredRedirectURIs() []string {
+	var uris []string
+	if v := readConfiguredRedirectURI(); v != "" {
+		uris = append(uris, v)
+	}
+	for _, v := range strings.Split(os.Getenv("ALLOWED_REDIRECT_URIS"), ",") {
+		if s := strings.TrimSpace(v); s != "" {
+			uris = append(uris, s)
+		}
+	}
+	return uris
+}
+
+func readConfiguredRedirectURI() string {
+	return strings.TrimSpace(os.Getenv("REDIRECT_URI"))
+}
+
+func normalizeRedirectHost(u *url.URL) string {
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		}
+	}
+	return host + ":" + port
+}
+
+func canonicalPath(p string) string {
+	if p == "" {
+		p = "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
+}
+
+func pathAllowed(got, allowed string) bool {
+	got = canonicalPath(got)
+	allowed = strings.TrimSuffix(canonicalPath(allowed), "/")
+	if allowed == "" {
+		return true
+	}
+	return strings.TrimSuffix(got, "/") == allowed || strings.HasPrefix(got, allowed+"/")
+}
+
+func sameRedirectOrigin(candidate, allowed *url.URL) bool {
+	return strings.EqualFold(candidate.Scheme, allowed.Scheme) &&
+		normalizeRedirectHost(candidate) == normalizeRedirectHost(allowed)
+}
+
+func redirectURIAllowed(candidate *url.URL) bool {
+	for _, raw := range configuredRedirectURIs() {
+		allowed, err := parseRedirectURI(raw)
+		if err != nil {
+			continue
+		}
+		if sameRedirectOrigin(candidate, allowed) && pathAllowed(candidate.Path, allowed.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseAllowedRedirect(raw string) (*url.URL, error) {
+	parsed, err := parseRedirectURI(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !redirectURIAllowed(parsed) {
+		return nil, errRedirectNotAllowed
+	}
+	return parsed, nil
+}
+
+func validateRedirectURI(raw string) (string, error) {
+	if _, err := parseAllowedRedirect(raw); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func redirectToUI(res http.ResponseWriter, uiURL string, status int, code, provider string) {
+	u, err := parseAllowedRedirect(uiURL)
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
+	sendUIRedirect(res, u, status, code, provider)
+}
+
+func sendUIRedirect(res http.ResponseWriter, ui *url.URL, status int, code, provider string) {
+	loc := *ui
+	fragment := url.Values{}
+	fragment.Set("status", strconv.Itoa(status))
+	if code != "" {
+		fragment.Set("code", code)
+	}
+	if provider != "" {
+		fragment.Set("provider", provider)
+	}
+	// Put the Hub handshake in the fragment so the auth code is not sent
+	// on subsequent requests (Referer) or written to access logs / history.
+	loc.Fragment = fragment.Encode()
+	res.Header().Set("Location", loc.String())
+	res.WriteHeader(http.StatusTemporaryRedirect)
 }

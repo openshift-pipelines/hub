@@ -2,6 +2,37 @@ import { Params } from '../common/params';
 import { SortByFields } from '../store/resource';
 import { titleCase } from '../common/titlecase';
 
+export const AUTH_CALLBACK_PARAMS = [Params.Code, Params.Status, Params.Provider];
+
+const hashSearchParams = (hash: string): URLSearchParams => {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  return new URLSearchParams(raw);
+};
+
+export const readAuthCallbackParams = (search: string, hash: string): URLSearchParams => {
+  const hashParams = hashSearchParams(hash || '');
+  if (AUTH_CALLBACK_PARAMS.some((key) => hashParams.has(key))) {
+    return hashParams;
+  }
+  return new URLSearchParams(search || '');
+};
+
+export const strippedAuthCallbackLocation = (
+  pathname: string,
+  search: string,
+  hash: string
+): string => {
+  const searchParams = new URLSearchParams(search || '');
+  const hashParams = hashSearchParams(hash || '');
+  AUTH_CALLBACK_PARAMS.forEach((key) => {
+    searchParams.delete(key);
+    hashParams.delete(key);
+  });
+  const nextSearch = searchParams.toString();
+  const nextHash = hashParams.toString();
+  return `${pathname}${nextSearch ? `?${nextSearch}` : ''}${nextHash ? `#${nextHash}` : ''}`;
+};
+
 // This function returns all selected filters in a combination of params
 export const UpdateURL = (
   search: string,
@@ -64,10 +95,21 @@ export const UpdateURL = (
     });
   }
 
-  // After redirection needs to delete Code & Status
-  if (searchParams.has(Params.Code)) {
-    searchParams.delete(Params.Code);
-    searchParams.delete(Params.Status);
+  // After redirection needs to delete Code & Status from query and hash
+  AUTH_CALLBACK_PARAMS.forEach((key) => searchParams.delete(key));
+
+  const hash = window.location.hash || '';
+  const hashParams = hashSearchParams(hash);
+  if (
+    AUTH_CALLBACK_PARAMS.some((key) => hashParams.has(key)) &&
+    typeof window.history.replaceState === 'function' &&
+    window.location.pathname
+  ) {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      strippedAuthCallbackLocation(window.location.pathname, window.location.search || '', hash)
+    );
   }
 
   return searchParams.toString();

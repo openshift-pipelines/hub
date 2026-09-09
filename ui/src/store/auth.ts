@@ -26,6 +26,7 @@ export type IError = Instance<typeof Error>;
 
 export interface AuthCodeProps {
   code: string;
+  provider?: string;
 }
 
 type AxiosCustomError = {
@@ -113,7 +114,7 @@ export const AuthStore = types
         self.setLoading(true);
 
         const { api } = self;
-        const json = yield api.authentication(authCode.code);
+        const json = yield api.authentication(authCode.code, authCode.provider);
 
         const userDetails = json.data;
 
