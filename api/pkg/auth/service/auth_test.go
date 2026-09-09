@@ -101,6 +101,27 @@ func TestInvalidLogin(t *testing.T) {
 	assert.Equal(t, res.Code, 400)
 }
 
+func TestLoginEmptyCode(t *testing.T) {
+	tc := testutils.Setup(t)
+	testutils.LoadFixtures(t, tc.FixturePath())
+
+	token.Now = testutils.Now
+
+	authSvc := New(tc)
+
+	provider = "github"
+	req, err := http.NewRequest("POST", "/auth/login?code=", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	http.HandlerFunc(authSvc.HubAuthenticate).ServeHTTP(res, req)
+
+	assert.Equal(t, http.StatusBadRequest, res.Code)
+	assert.Equal(t, "auth code is required\n", res.Body.String())
+}
+
 func TestProviderList(t *testing.T) {
 	req, err := http.NewRequest("POST", "/auth/providers", nil)
 	if err != nil {

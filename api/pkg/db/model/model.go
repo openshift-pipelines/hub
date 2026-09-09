@@ -119,7 +119,7 @@ type (
 		Scopes               []*Scope `gorm:"many2many:user_scopes;"`
 		RefreshTokenChecksum string
 		AvatarURL            string
-		Code                 string
+		Code                 *string
 	}
 
 	User struct {
@@ -128,7 +128,7 @@ type (
 		Type                 UserType
 		AgentName            string
 		RefreshTokenChecksum string
-		Code                 string
+		Code                 *string
 		Scopes               []*Scope  `gorm:"many2many:user_scopes;"`
 		Accounts             []Account `gorm:"constraint:OnDelete:CASCADE;"`
 	}
