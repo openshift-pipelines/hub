@@ -193,3 +193,8 @@ spec:
                 secretKeyRef:
                   name: tekton-hub-api
                   key: AUTH_BASE_URL
+            - name: REDIRECT_URI
+              valueFrom:
+                secretKeyRef:
+                  name: tekton-hub-api
+                  key: REDIRECT_URI

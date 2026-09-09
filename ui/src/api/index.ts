@@ -31,7 +31,7 @@ export interface Api {
   catalogs(): Promise<ICatalog>;
   resourceVersion(resourceId: number): Promise<IVersion>;
   versionUpdate(versionId: number): Promise<IVersion>;
-  authentication(authCode: string): Promise<AuthResponse>;
+  authentication(authCode: string, provider?: string): Promise<AuthResponse>;
   readme(resourceKey: string, version: string): Promise<string>;
   yaml(
     resourceKey: string,
@@ -75,10 +75,14 @@ export class Hub implements Api {
     }
   }
 
-  async authentication(authCode: string) {
+  async authentication(authCode: string, provider?: string) {
     try {
+      const params = new URLSearchParams({ code: authCode });
+      if (provider) {
+        params.set('provider', provider);
+      }
       return axios
-        .post(`${AUTH_BASE_URL}/auth/login?code=${authCode}`)
+        .post(`${AUTH_BASE_URL}/auth/login?${params.toString()}`)
         .then((response) => response.data)
         .catch((err) => Promise.reject(err.response));
     } catch (error) {
