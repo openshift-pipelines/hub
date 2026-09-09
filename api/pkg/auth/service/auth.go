@@ -132,6 +132,10 @@ func (s *service) HubAuthenticate(res http.ResponseWriter, req *http.Request) {
 
 	// Get the auth code from params
 	code := req.FormValue("code")
+	if code == "" {
+		http.Error(res, "auth code is required", http.StatusBadRequest)
+		return
+	}
 
 	r := request{
 		db:            s.DB(context.Background()),
@@ -158,7 +162,7 @@ func (s *service) HubAuthenticate(res http.ResponseWriter, req *http.Request) {
 	}
 
 	// Once the user is authenticated clear the code from DB and user struct so that it can't be reused once the user logs in
-	gitUser.Code = ""
+	gitUser.Code = nil
 	if err := r.db.Model(&model.User{}).Where("email = ?", gitUser.Email).Update("code", gitUser.Code).Error; err != nil {
 		r.log.Error(err)
 		http.Error(res, err.Error(), http.StatusInternalServerError)
