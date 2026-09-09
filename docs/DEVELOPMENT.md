@@ -112,6 +112,8 @@ For `ACCESS_JWT_EXPIRES_IN` and `REFRESH_JWT_EXPIRES_IN` you can set the time as
 
 For `AUTH_BASE_URL`, use the `http://localhost:4200`
 
+For `REDIRECT_URI`, use the Hub UI origin, for example `http://localhost:3000`. OAuth callbacks are only redirected to this allow-listed URL.
+
 ### Running API Service
 
 Once the database is setup and the migration has been run, you can run api service by

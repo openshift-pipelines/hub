@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
+	"github.com/gorilla/mux"
 	"github.com/markbates/goth"
 	"github.com/stretchr/testify/assert"
 	authApp "github.com/tektoncd/hub/api/pkg/auth/app"
@@ -37,8 +39,7 @@ func TestLogin(t *testing.T) {
 
 	authSvc := New(tc)
 
-	provider = "github"
-	req, err := http.NewRequest("POST", "/auth/login?code=test-code", nil)
+	req, err := http.NewRequest("POST", "/auth/login?code=test-code&provider=github", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +88,7 @@ func TestInvalidLogin(t *testing.T) {
 
 	authSvc := New(tc)
 
-	provider = "github"
-	req, err := http.NewRequest("POST", "/auth/login?code=fake-code", nil)
+	req, err := http.NewRequest("POST", "/auth/login?code=fake-code&provider=github", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,6 @@ func TestLoginEmptyCode(t *testing.T) {
 
 	authSvc := New(tc)
 
-	provider = "github"
 	req, err := http.NewRequest("POST", "/auth/login?code=", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +122,8 @@ func TestLoginEmptyCode(t *testing.T) {
 }
 
 func TestProviderList(t *testing.T) {
+	t.Setenv("GH_CLIENT_ID", "client-id")
+	t.Setenv("GH_CLIENT_SECRET", "client-secret")
 	req, err := http.NewRequest("POST", "/auth/providers", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -271,4 +272,151 @@ func TestInsertData_EmailExistsAddNewAccount(t *testing.T) {
 	err = accountQuery.Find(&accounts).Error
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(accounts))
+}
+
+func TestValidateRedirectURI(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "")
+
+	valid, err := validateRedirectURI("https://hub.example.com/")
+	assert.NoError(t, err)
+	assert.Equal(t, "https://hub.example.com/", valid)
+
+	_, err = validateRedirectURI("https://hub.example.com/login")
+	assert.NoError(t, err)
+
+	_, err = validateRedirectURI("")
+	assert.Error(t, err)
+
+	_, err = validateRedirectURI("javascript:alert(1)")
+	assert.Error(t, err)
+
+	_, err = validateRedirectURI("https://user:pass@hub.example.com/")
+	assert.Error(t, err)
+
+	_, err = validateRedirectURI("https://hub.example.com/\r\nLocation: https://evil.example")
+	assert.Error(t, err)
+
+	_, err = validateRedirectURI("https://evil.example.com/")
+	assert.EqualError(t, err, "redirect_uri is not allowed")
+
+	_, err = validateRedirectURI("https://hub.example.com.evil.com/")
+	assert.EqualError(t, err, "redirect_uri is not allowed")
+}
+
+func TestValidateRedirectURIPathPrefix(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/hub")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "")
+
+	_, err := validateRedirectURI("https://hub.example.com/hub")
+	assert.NoError(t, err)
+
+	_, err = validateRedirectURI("https://hub.example.com/hub/callback")
+	assert.NoError(t, err)
+
+	_, err = validateRedirectURI("https://hub.example.com/other")
+	assert.EqualError(t, err, "redirect_uri is not allowed")
+}
+
+func TestValidateRedirectURIRequiresAllowList(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "")
+
+	_, err := validateRedirectURI("https://hub.example.com/")
+	assert.EqualError(t, err, "redirect_uri is not allowed")
+}
+
+func TestAuthenticateRejectsInvalidRedirectURI(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github?redirect_uri=javascript:alert(1)", nil)
+	req = mux.SetURLVars(req, map[string]string{"provider": "github"})
+	res := httptest.NewRecorder()
+
+	Authenticate(res, req)
+
+	assert.Equal(t, http.StatusBadRequest, res.Code)
+}
+
+func TestRedirectToUIIncludesProvider(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	res := httptest.NewRecorder()
+	redirectToUI(res, "https://hub.example.com/login", http.StatusOK, "auth-code", "github")
+
+	assert.Equal(t, http.StatusTemporaryRedirect, res.Code)
+	assertAuthCodeInFragment(t, res.Header().Get("Location"), "auth-code", "github", "200")
+}
+
+func TestAuthenticateRejectsUnlistedRedirectURI(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github?redirect_uri=https://evil.example.com/", nil)
+	req = mux.SetURLVars(req, map[string]string{"provider": "github"})
+	res := httptest.NewRecorder()
+
+	Authenticate(res, req)
+
+	assert.Equal(t, http.StatusBadRequest, res.Code)
+	assert.Empty(t, res.Header().Get("Location"))
+}
+
+func TestRedirectToUIDoesNotLeakCodeToUnlistedHost(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	res := httptest.NewRecorder()
+	redirectToUI(res, "https://evil.example.com/", http.StatusOK, "stolen-code", "github")
+
+	assert.Equal(t, http.StatusBadRequest, res.Code)
+	assert.Empty(t, res.Header().Get("Location"))
+	assert.NotContains(t, res.Body.String(), "stolen-code")
+}
+
+func TestCallbackRedirectsToPrimaryConfiguredURI(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "https://other.example.com/")
+
+	uiURL, err := validateRedirectURI(readConfiguredRedirectURI())
+	assert.NoError(t, err)
+	assert.Equal(t, "https://hub.example.com/", uiURL)
+
+	res := httptest.NewRecorder()
+	redirectToUI(res, uiURL, http.StatusOK, "auth-code", "github")
+
+	location := res.Header().Get("Location")
+	assert.Equal(t, http.StatusTemporaryRedirect, res.Code)
+	assert.Contains(t, location, "https://hub.example.com/")
+	assert.NotContains(t, location, "other.example.com")
+	assertAuthCodeInFragment(t, location, "auth-code", "github", "200")
+}
+
+func assertAuthCodeInFragment(t *testing.T, location, code, provider, status string) {
+	t.Helper()
+	u, err := url.Parse(location)
+	assert.NoError(t, err)
+	assert.Empty(t, u.RawQuery)
+	assert.Empty(t, u.Query().Get("code"))
+	assert.Empty(t, u.Query().Get("status"))
+	assert.Empty(t, u.Query().Get("provider"))
+
+	frag, err := url.ParseQuery(u.Fragment)
+	assert.NoError(t, err)
+	assert.Equal(t, code, frag.Get("code"))
+	assert.Equal(t, provider, frag.Get("provider"))
+	assert.Equal(t, status, frag.Get("status"))
+}
+
+func TestAuthenticateDoesNotSetHubUIRedirectCookie(t *testing.T) {
+	t.Setenv("REDIRECT_URI", "https://hub.example.com/")
+	t.Setenv("ALLOWED_REDIRECT_URIS", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github?redirect_uri=https://hub.example.com/", nil)
+	req = mux.SetURLVars(req, map[string]string{"provider": "github"})
+	res := httptest.NewRecorder()
+
+	Authenticate(res, req)
+
+	for _, c := range res.Result().Cookies() {
+		assert.NotEqual(t, "_hub_ui_redirect", c.Name)
+	}
 }
