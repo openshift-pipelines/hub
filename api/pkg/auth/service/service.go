@@ -139,7 +139,7 @@ func (r *request) insertData(gitUser goth.User, code, provider string) error {
 			// Account exists
 			// Update the user table with the email
 			if err := r.db.Model(&model.User{}).Where("id = ?", acc.UserID).
-				Updates(model.User{Code: code, Email: gitUser.Email, Type: model.NormalUserType}).Error; err != nil {
+				Updates(model.User{Code: &code, Email: gitUser.Email, Type: model.NormalUserType}).Error; err != nil {
 				r.log.Error(err)
 				return err
 			}
@@ -213,7 +213,7 @@ func updateAccountDetails(accountQuery *gorm.DB, existingAccountDetails model.Ac
 // Creates a new record in Users table
 func (r *request) insertIntoUsersTable(gitUser goth.User, code string) (model.User, error) {
 	user := model.User{
-		Code:  code,
+		Code:  &code,
 		Email: gitUser.Email,
 		Type:  model.NormalUserType,
 	}
