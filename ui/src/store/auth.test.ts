@@ -33,7 +33,8 @@ describe('Store functions', () => {
     expect(store.isLoading).toBe(true);
 
     const code = {
-      code: 'foo'
+      code: 'foo',
+      provider: 'github'
     };
 
     store.authenticate(code);

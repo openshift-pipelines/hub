@@ -7,5 +7,6 @@ export enum Params {
   Platform = 'platform',
   Tag = 'tag',
   Code = 'code',
-  Status = 'status'
+  Status = 'status',
+  Provider = 'provider'
 }

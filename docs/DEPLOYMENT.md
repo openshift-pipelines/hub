@@ -203,10 +203,13 @@ stringData:
   JWT_SIGNING_KEY: a-long-signing-key
   ACCESS_JWT_EXPIRES_IN: time such as 15m
   REFRESH_JWT_EXPIRES_IN: time such as 15m
-  AUTH_BASE_URL: auth route
+  AUTH_BASE_URL: auth route (http or https; must match the GitHub/GitLab OAuth callback host)
+  REDIRECT_URI: UI URL << must match the UI ConfigMap REDIRECT_URI
   GHE_URL: Add Github Enterprise URL in case of authenticating through Github Enterprise (Example (https|http)://myghe.com) --> Do not provide the catalog URL
   GLE_URL: Add Gitlab Enterprise URL in case of authenticating through Gitlab Enterprise (Example (https|http)://mygle.com) --> Do not provide the catalog URL
 ```
+
+Set `AUTH_BASE_URL` and `REDIRECT_URI` on the `tekton-hub-api` Secret (not the API ConfigMap). `AUTH_BASE_URL` is the public Hub auth URL (for example `http://hub-api.example.com`). `REDIRECT_URI` is the Hub UI origin (for example `http://hub.example.com`) and is the allow-list for OAuth callbacks. The UI ConfigMap values must match.
 
 ### Update API ConfigMap
 
@@ -393,6 +396,8 @@ data:
   CUSTOM_LOGO_MEDIA_TYPE: << Update this by your logo media type
   CUSTOM_LOGO_BASE64_DATA: << Update this by Base64 encode DATA of Custom Logo
 ```
+
+This UI `REDIRECT_URI` is sent by the browser during login. It must match `REDIRECT_URI` on the `tekton-hub-api` Secret, which is the allow-list the API uses to block open redirects.
 
 ### Add Custom Logo
 
