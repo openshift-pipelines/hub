@@ -64,7 +64,8 @@
     "async":"3.2.6",
     "nth-check": "2.1.1",
     "postcss":"8.5.32",
-    "webpack-dev-middleware": "7.4.6"
+    "webpack-dev-middleware": "7.4.6",
+    "uri-js": "npm:uri-js-replace@^1.0.3"
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
